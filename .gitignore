@@ -1,0 +1,17 @@
+# Desktop runtime state, including authentication material.
+sessions/
+.launch.lock
+password
+*.passwd
+connection.txt
+connection-ended.txt
+connection.yml
+*.log
+slurm-*.out
+
+# Local configuration and caches.
+.env
+.env.*
+__pycache__/
+*.py[cod]
+.DS_Store
