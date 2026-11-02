@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=interactive
-#SBATCH --account=mit_amf_advanced_cpu
-#SBATCH --qos=mit_amf_advanced_cpu
 #SBATCH --partition=mit_normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -14,17 +12,15 @@
 set -euo pipefail
 
 # Run directly as `interactive.sh [cpu|gpu] [sbatch options...]` to select
-# the matching account and QoS. Plain `sbatch interactive.sh` uses CPU defaults.
+# the partition. Your Slurm default account/QoS apply unless overridden.
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     target="${1:-cpu}"
     if (( $# > 0 )); then shift; fi
     case "$target" in
         cpu|mit_normal)
-            account=mit_amf_advanced_cpu
             partition=mit_normal
             ;;
         gpu|mit_normal_gpu)
-            account=mit_amf_advanced_gpu
             partition=mit_normal_gpu
             ;;
         *)
@@ -32,8 +28,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
             exit 2
             ;;
     esac
-    exec sbatch --account="$account" --qos="$account" \
-        --partition="$partition" "$@" "$(readlink -f "${BASH_SOURCE[0]}")"
+    exec sbatch --partition="$partition" "$@" "$(readlink -f "${BASH_SOURCE[0]}")"
 fi
 
 echo "Allocation ${SLURM_JOB_ID} is ready on $(hostname -s)."

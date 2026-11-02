@@ -1,111 +1,137 @@
-# ORCD desktop VNC
+# ORCD desktop over SSH and VNC
 
-Personal utilities for running a KDE desktop on MIT ORCD's Engaging cluster
-through Slurm, Apptainer, TurboVNC, and an SSH tunnel. This is an
-ORCD-specific setup, not an official ORCD project.
+Launch or reuse a KDE desktop in a Slurm allocation on MIT Engaging from your own computer. Slurm selects an eligible compute node; the helper discovers its hostname and VNC port automatically. VNC listens on loopback and is reached through an SSH tunnel.
 
-## Contents
+You need your own Engaging access and permitted Slurm resources. This project does not provide an account or allocation. No personal usernames, account names, SSH keys, or session passwords are included.
 
-- `desktop-vnc/launch.sh`: submit a desktop with a private session directory.
-- `desktop-vnc/desktop.sbatch`: run the system KDE container and localhost-only VNC server.
-- `desktop-vnc/connect.sh`: connect from your computer, open a job shell, or generate SSH configuration.
-- `desktop-vnc/find-session.py`: resolve a running job's node and VNC connection details.
-- `desktop-vnc/ensure-session.py`: reuse or submit a desktop for `ssh orcd-desktop`.
-- `scripts/interactive.sh`: companion CPU/GPU allocation helper, independent of VNC.
+## 1. Configure SSH on your computer
 
-## Install on Engaging
+Use macOS, Linux, or a suitable Bash/OpenSSH environment such as WSL on Windows. Install a VNC viewer compatible with TurboVNC. On Windows with WSL, use the helper inside WSL; viewer access through localhost depends on your WSL networking setup.
 
-Requires an ORCD account with SSH and Slurm access. The desktop uses the
-cluster's `apptainer/1.4.2` module and existing KDE image at
-`/home/systems/engaging-ood-ww/kde/mit/container.sif`; neither is bundled here.
-The scripts also require Bash and Python 3 (standard library only).
+Merge `ssh-config.example` into `~/.ssh/config`, replacing `YOUR_MIT_USERNAME` with your Engaging username. Keep your existing SSH entries and use your own authentication settings. If `Host orcd` already exists, update it instead of adding a duplicate. Protect the configuration with `chmod 600 ~/.ssh/config`.
+
+Verify that this works first:
+
+```bash
+ssh orcd
+```
+
+Authentication, including any required interactive prompts, is handled by SSH. The login and compute-node connections can each require authentication. If you use a key outside the default paths, configure it for the login alias, `orcd-desktop`, and compute-node hosts as shown in the template. Do not disable host-key checking.
+
+## 2. Install the remote scripts on Engaging
+
+From the Engaging login shell:
 
 ```bash
 git clone https://github.com/jcbliao/orcd-desktop-vnc.git
 cp -R orcd-desktop-vnc/desktop-vnc ~/desktop-vnc
+cd ~/desktop-vnc
+cp config.example config.sh
 ```
 
-The copy command assumes `~/desktop-vnc` does not exist. If you already have
-an installation, compare and update its source files individually, preserving
-your existing `sessions/` directory. The local connection helper expects the
-cluster scripts at `~/desktop-vnc`.
+Edit `config.sh` for your allocation. `DESKTOP_ACCOUNT` and `DESKTOP_QOS` are deliberately unset, so Slurm uses your defaults. If your allocation requires explicit values, uncomment those settings and supply your own. Adjust the partition, CPU count, memory, and wall time as needed. Default requests are 8 CPUs, 64 GB, and 6 hours in `mit_normal`.
 
-Launch a desktop on the login node:
+The remote scripts require Python 3 (standard library only), Bash, Slurm tools, the modules initialization file `/etc/profile.d/modules.sh`, and Apptainer. They default to `apptainer/1.4.2` and the existing Engaging KDE image at `/home/systems/engaging-ood-ww/kde/mit/container.sif`. Configure a different module or compatible image in `config.sh` if necessary. The image must supply KDE Plasma, `vncserver`, `vncpasswd`, `kwriteconfig5`, and `dbus-run-session`. It is not included in this repository.
+
+Eligible nodes need access to the image and the bind paths listed in `desktop.sbatch`: `/home`, `/orcd`, `/nfs`, `/net`, `/var/lib/sss`, `/var/run/munge`, and `/etc/slurm`. This is an Engaging-oriented setup, not a generic installer for every HPC cluster.
+
+If `~/desktop-vnc` already exists, preserve it before installing; do not clone over your active session directory.
+
+## 3. Install the helper on your computer
+
+In a local terminal:
 
 ```bash
-~/desktop-vnc/launch.sh --detach
+git clone https://github.com/jcbliao/orcd-desktop-vnc.git
+cd orcd-desktop-vnc
+cp desktop-vnc/connect.sh ~/connect-desktop.sh
+chmod 700 ~/connect-desktop.sh
 ```
 
-Defaults are `mit_normal`, account/QoS `mit_amf_advanced_cpu`, 8 CPUs,
-64 GB RAM, and 6 hours. These are the original setup's defaults; if your
-allocation differs, supply your permitted account, QoS, and partition:
+Keep any previous helper as a backup before replacing it. The helper gets your remote username from `ssh -G orcd`, so your local computer username need not match your Engaging username.
+
+## 4. Launch and connect
 
 ```bash
-~/desktop-vnc/launch.sh --detach \
-  --account=YOUR_ACCOUNT --qos=YOUR_QOS --partition=YOUR_PARTITION \
-  --cpus-per-task=4 --mem=16G --time=02:00:00
-```
-
-## Connect from your computer
-
-Install TurboVNC Viewer and use a shell with Bash and OpenSSH. Copy the helper:
-
-```bash
-scp YOUR_ORCD_USERNAME@orcd-login.mit.edu:~/desktop-vnc/connect.sh ~/connect-desktop.sh
-export ORCD_USER=YOUR_ORCD_USERNAME
 bash ~/connect-desktop.sh
 ```
 
-Open TurboVNC Viewer at `127.0.0.1::15901` with the password printed by the
-helper. Keep the SSH tunnel open. `ORCD_USER` defaults to your local `$USER`;
-set it in your local shell startup file if the usernames differ.
+The helper starts a job if you have none, or reuses your existing desktop job. It waits for scheduling and VNC startup, prints the password, then opens the tunnel. Queue time depends on available resources. Open TurboVNC Viewer and connect to:
 
-For automatic desktop submission and an SSH shell with VNC forwarding:
-
-```bash
-bash ~/connect-desktop.sh --ssh-config
+```text
+127.0.0.1::15901
 ```
 
-Review and place that output in your local `~/.ssh/config` before `Host *`
-defaults, then run `ssh orcd-desktop`. This mode submits a desktop with the
-launcher defaults if none exists. If you need different resources, launch
-the desktop explicitly first. Even `ssh -G orcd-desktop` triggers the lookup
-and may submit a job because it evaluates the generated `Match exec` rule.
+Enter the printed VNC password. Keep the terminal open while using the viewer. Closing the viewer or tunnel does not cancel the desktop; reconnect by running the helper again. The desktop ends when its job finishes, fails, or reaches its wall-time limit.
 
-See [desktop usage and troubleshooting](desktop-vnc/README.md) for job-ID
-selection, alternate local ports, manual tunnels, and session management.
-
-## Companion allocation helper
-
-Run on Engaging to reserve resources without starting a desktop:
+Other options:
 
 ```bash
-bash scripts/interactive.sh cpu --time=02:00:00
-bash scripts/interactive.sh gpu --gres=gpu:1 --time=02:00:00
-squeue -u "$USER"
-srun --jobid=JOB_ID --overlap --pty bash -l
+# Open a shell on the desktop's assigned node.
+bash ~/connect-desktop.sh --ssh
+
+# Connect to a specific already-running job, without launching another.
+bash ~/connect-desktop.sh 12345678
+
+# Use a different local port if 15901 is occupied.
+VNC_LOCAL_PORT=15902 bash ~/connect-desktop.sh
+```
+
+With the optional `Match` section from `ssh-config.example`, this shortcut starts/reuses the desktop and opens a shell plus VNC tunnel:
+
+```bash
+ssh orcd-desktop
+```
+
+The shortcut regenerates `~/.ssh/orcd-desktop-session.conf` with the current node and port. Do not hardcode a node or share that generated file. SSH configuration inspection such as `ssh -G orcd-desktop` also evaluates `Match exec` and can start a job; use `ssh -G orcd` to inspect only the login alias.
+
+## Manage jobs and troubleshoot
+
+On Engaging:
+
+```bash
+squeue --me
 scancel JOB_ID
 ```
 
-The GPU mode selects `mit_normal_gpu` and account/QoS `mit_amf_advanced_gpu`;
-request GPU resources explicitly with the appropriate Slurm flags. CPU mode
-uses `mit_normal` and `mit_amf_advanced_cpu`. Extra `sbatch` arguments override
-these defaults. The helper defaults to 4 CPUs, 16 GB, and 2 days; adjust the
-time limit for your partition. Job output is discarded by default, so use
-`squeue` to obtain the assigned node or override `--output`/`--error`.
+Cancel only the desktop job you intend to stop. Changing `config.sh` affects new jobs; an existing desktop is reused with its original resources. To submit manually with resource overrides:
 
-## Runtime files and behavior
+```bash
+cd ~/desktop-vnc
+bash launch.sh --detach --time=02:00:00 --mem=16G
+```
 
-Session passwords, connection details, logs, and lock files are generated
-locally and excluded from Git. Do not upload session directories, SSH keys,
-shell configuration, or OnDemand output. VNC listens only on localhost and
-is reached through SSH. Closing a viewer or tunnel leaves the Slurm job
-running; stop it with `scancel JOB_ID`.
+Running `launch.sh` directly always submits a new job. If multiple desktop jobs exist, the automatic launcher asks you to resolve the ambiguity; the local helper can connect to a specific running job ID.
 
-Starting a desktop disables KDE automatic idle/resume locking in your cluster
-KDE preferences because the container cannot authenticate that lock screen.
-SSH and VNC authentication still apply. The desktop requests no GPU.
+Each launch creates `sessions/session-XXXXXXXX/` containing `job-id`, `job.log`, `desktop.log`, `vnc.log`, and connection details. Check those logs if startup fails. A pending job is usually waiting for scheduling or has an allocation/resource issue; inspect it with `scontrol show job JOB_ID`. A missing module, image, or bind directory requires adapting the configuration to available cluster resources.
 
-Fiji and other desktop applications are optional user installations, not
-dependencies of these access scripts. Application binaries, personal desktop
-preferences, and local application launchers are not bundled.
+The container's KDE automatic screen lock is disabled because it has no usable desktop-login password. Access relies on SSH and the VNC password. Treat session files and logs as private: they can contain that password. They are created under a restrictive umask and excluded by `.gitignore`. Never commit keys, passwords, or generated session directories.
+
+## Files
+
+| File | Runs on | Purpose |
+| --- | --- | --- |
+| `desktop-vnc/connect.sh` | Your computer | Starts/reuses a session and connects through SSH |
+| `ssh-config.example` | Your computer | Login alias and optional desktop shortcut |
+| `ensure-session.py` | Engaging | Serializes discovery/submission and waits for readiness |
+| `launch.sh` | Engaging | Submits a new desktop allocation |
+| `config.example` | Engaging | Copy to private `config.sh` for your Slurm settings |
+| `desktop.sbatch` | Assigned node | Starts the container, VNC, and KDE |
+| `find-session.py` | Engaging | Resolves and validates the current job's host and port |
+
+The scripts use no third-party Python packages. Cluster execution must be validated with your own allocation and environment.
+
+## Companion allocation helper
+
+`scripts/interactive.sh` reserves a CPU or GPU allocation without starting a desktop. It uses your Slurm default account/QoS; pass your own overrides when required:
+
+```bash
+bash scripts/interactive.sh cpu --account=YOUR_ACCOUNT --qos=YOUR_QOS --time=02:00:00
+bash scripts/interactive.sh gpu --gres=gpu:1 --account=YOUR_ACCOUNT --qos=YOUR_QOS --time=02:00:00
+```
+
+CPU mode selects `mit_normal`; GPU mode selects `mit_normal_gpu`. It requests 4 CPUs and 16 GB by default; specify a permitted time limit (the original default is 2 days). The job stays alive until its time limit or cancellation. Use `squeue --me` to find its job ID and `srun --jobid=JOB_ID --overlap --pty bash -l` to attach. This is a community utility, not an official ORCD project.
+
+## Offline validation
+
+Run `python3 -m unittest discover -s tests -v` (or `uv run --no-project python -m unittest discover -s tests -v`). Tests stub SSH and Slurm; they do not submit jobs. A live desktop still requires an Engaging allocation and the container environment.

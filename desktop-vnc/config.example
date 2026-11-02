@@ -1,0 +1,10 @@
+# Copy to config.sh on Engaging. Unset account/QoS use your Slurm defaults.
+# Set these to values your own allocation permits; do not copy someone else's.
+# DESKTOP_ACCOUNT=your_slurm_account
+# DESKTOP_QOS=your_slurm_qos
+DESKTOP_PARTITION=mit_normal
+DESKTOP_CPUS=8
+DESKTOP_MEMORY=64G
+DESKTOP_TIME=06:00:00
+DESKTOP_IMAGE=/home/systems/engaging-ood-ww/kde/mit/container.sif
+DESKTOP_APPTAINER_MODULE=apptainer/1.4.2

@@ -1,0 +1,30 @@
+# Merge into ~/.ssh/config on YOUR COMPUTER; do not replace existing entries.
+# Replace YOUR_MIT_USERNAME. If you already have Host orcd, edit that entry.
+Host orcd
+    HostName orcd-login.mit.edu
+    User YOUR_MIT_USERNAME
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    # Optional: uncomment and set your own key path if needed.
+    # IdentityFile ~/.ssh/id_ed25519
+
+# Optional shortcut: requires ~/connect-desktop.sh on your computer.
+# Put this section before any broad Host * defaults that set User/HostName.
+Match originalhost orcd-desktop exec "bash ~/connect-desktop.sh --prepare-ssh"
+    Include ~/.ssh/orcd-desktop-session.conf
+
+Host orcd-desktop
+    ServerAliveInterval 60
+    ExitOnForwardFailure yes
+    # If you use a non-default key, specify it here too.
+    # IdentityFile ~/.ssh/id_ed25519
+
+# Needed for custom compute-node key settings, not for choosing a fixed node.
+Host node*.inband
+    User YOUR_MIT_USERNAME
+    ProxyJump orcd
+    ServerAliveInterval 60
+    # IdentityFile ~/.ssh/id_ed25519
+
+# Reset the scope before any further SSH configuration.
+Host *

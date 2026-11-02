@@ -1,16 +1,15 @@
 #!/bin/bash
 set -eo pipefail
 umask 077
-
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
     echo 'Use launch.sh to submit this desktop to Slurm.' >&2
     exit 1
 fi
 session=$PWD
-image=/home/systems/engaging-ood-ww/kde/mit/container.sif
+image=${1:-/home/systems/engaging-ood-ww/kde/mit/container.sif}
 source /etc/profile.d/modules.sh
 module purge
-module load apptainer/1.4.2
+module load "${2:-apptainer/1.4.2}"
 export APPTAINER_BINDPATH=/home,/orcd,/nfs,/net,/var/lib/sss,/var/run/munge,/etc/slurm
 instance="desktop-vnc-${SLURM_JOB_ID}-$$"
 display=
@@ -31,22 +30,18 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
-
-# Do not inherit a desktop or D-Bus session from the submitting environment.
 unset DISPLAY DBUS_SESSION_BUS_ADDRESS SESSION_MANAGER WAYLAND_DISPLAY
 apptainer instance start "$image" "$instance"
 started=1
-# The container has no usable desktop-login password. VNC authentication and
-# the SSH tunnel protect access; do not let KDE add an unusable idle lock.
+# The container has no usable desktop-login password; use VNC + SSH auth.
 apptainer exec "instance://$instance" kwriteconfig5 --file kscreenlockerrc --group Daemon --key Autolock --type bool false
 apptainer exec "instance://$instance" kwriteconfig5 --file kscreenlockerrc --group Daemon --key LockOnResume --type bool false
 if [[ ! -s "$session/password" ]]; then
-    python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8)))' > "$session/password"
+    python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(8)))' > "$session/password"
 fi
 apptainer exec "instance://$instance" vncpasswd -f < "$session/password" > "$session/vnc.passwd"
 vnc_output=$(apptainer exec "instance://$instance" vncserver \
-    -localhost -securitytypes VNC -noxstartup \
-    -geometry 1920x1080 -depth 24 \
+    -localhost -securitytypes VNC -noxstartup -geometry 1920x1080 -depth 24 \
     -rfbauth "$session/vnc.passwd" -log "$session/vnc.log" 2>&1) || {
     printf '%s\n' "$vnc_output" >&2
     exit 1
@@ -63,11 +58,7 @@ export APPTAINERENV_XDG_CURRENT_DESKTOP=KDE
 export APPTAINERENV_KDE_FULL_SESSION=true
 export APPTAINERENV_KDE_SESSION_VERSION=5
 export APPTAINERENV_QT_QPA_PLATFORMTHEME=KDE
-
-# Keep the desktop lifetime tied to this job; dbus-run-session also cleans up
-# its private D-Bus daemon. The container supplies the complete KDE environment.
-apptainer exec "instance://$instance" dbus-run-session -- startplasma-x11 \
-    > "$session/desktop.log" 2>&1 &
+apptainer exec "instance://$instance" dbus-run-session -- startplasma-x11 > "$session/desktop.log" 2>&1 &
 desktop_pid=$!
 sleep 5
 if ! kill -0 "$desktop_pid" 2>/dev/null; then
@@ -77,22 +68,21 @@ if ! kill -0 "$desktop_pid" 2>/dev/null; then
 fi
 node=$(hostname -f)
 username=$(id -un)
-cat > "$session/connection.txt" <<EOF
+# Publish readiness atomically so readers never see partial connection details.
+cat > "$session/connection.tmp" <<END
 Desktop job: $SLURM_JOB_ID
 Compute node: $node
 VNC display: :$display (TCP port $port)
 
 On your own computer, run and leave this SSH tunnel open:
-ssh -N -T -o ExitOnForwardFailure=yes -J $username@orcd-login.mit.edu -L 15901:127.0.0.1:$port $username@$node
+ssh -N -T -o ExitOnForwardFailure=yes -J $username@orcd-login.mit.edu -L 127.0.0.1:15901:127.0.0.1:$port $username@$node
 
-In TurboVNC Viewer, connect to:
-127.0.0.1::15901
-
+In TurboVNC Viewer, connect to: 127.0.0.1::15901
 VNC password: $(cat "$session/password")
 
-Closing the viewer leaves the job running. Reconnect with the same tunnel/password.
-Stop the desktop when finished:
-scancel $SLURM_JOB_ID
-EOF
+Closing the viewer leaves the job running.
+Stop the desktop when finished: scancel $SLURM_JOB_ID
+END
+mv "$session/connection.tmp" "$session/connection.txt"
 cat "$session/connection.txt"
 wait "$desktop_pid"
